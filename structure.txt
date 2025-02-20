@@ -1,0 +1,8 @@
+redshift_query_agent/
+│── config.py                # Configuration file for database settings
+│── schema_fetcher.py         # Fetches schema details from Redshift
+│── query_generator.py        # Uses pydantic.ai to generate SQL queries
+│── sql_validator.py          # Validates the SQL query
+│── db_connector.py           # Connects to Redshift and executes the query
+│── main.py                   # Main entry point for user queries
+│── requirements.txt          # Dependencies

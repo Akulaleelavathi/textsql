@@ -1,0 +1,5 @@
+pydantic-ai
+sqlalchemy
+pandas
+sqlvalidator
+psycopg2-binary
