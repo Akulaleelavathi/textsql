@@ -1,6 +1,15 @@
 import os
+import os
+from urllib.parse import quote_plus
 
-DATABASE_URL = os.getenv("REDSHIFT_DB_URL", "postgresql://username:password@redshift-cluster-url:5439/dbname")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key")
-# export REDSHIFT_DB_URL="postgresql://username:password@redshift-cluster-url:5439/dbname"
-# export OPENAI_API_KEY="your-api-key"
+password = "Service@007"
+encoded_password = quote_plus(password)
+
+DATABASE_URL = os.getenv(
+    "REDSHIFT_DB_URL",
+    # f"redshift+psycopg2://zonoservice:{encoded_password}@zono-digital-redshift-cluster.c5m55gnwhus9.ap-south-1.redshift.amazonaws.com:5439/qa"
+     f"redshift+psycopg2://zonoservice:{encoded_password}@localhost:5440/qa"
+)
+
+OPENAI_API_KEY = os.getenv("3fa63f591fde45c6a32b9dc06e2af714")
+
