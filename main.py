@@ -28,15 +28,33 @@ def identify_table_node(state: QueryState) -> QueryState:
     print(f"identify_table_node -> Identified table: {state.table_name}")
     return state
 
-def fetch_schema_node(state: QueryState) -> QueryState:
-    state.schema_dict = fetch_redshift_schema(state.table_name)
-    print(f"fetch_schema_node -> Fetched schema: {state.schema_dict}")
-    if isinstance(state.schema_dict, str):
-        return QueryState(**state.dict(), response={"error": state.schema_dict})
-    if not state.table_name:
-        raise ValueError("Table name could not be identified from user input.")
 
+
+
+# def fetch_schema_node(state: QueryState) -> QueryState:
+#     state.schema_dict = fetch_redshift_schema(state.table_name)
+    
+#     if isinstance(state.schema_dict, str):
+#         state.response = {"error": state.schema_dict}
+#         print(f"Error found, setting response: {state.response}")  # Debug print for error case
+#         return state  # Return the modified state directly
+    
+#     print(f"fetch_schema_node -> Returning state with schema_dict: {state.schema_dict}")
+#     return state
+
+
+def fetch_schema_node(state: QueryState) -> QueryState:
+    state.schema_dict = fetch_redshift_schema("zoai_invoice_report")
+    
+    if isinstance(state.schema_dict, str):
+        state.response = {"error": state.schema_dict}
+        print(f"Error found, setting response: {state.response}")  # Debug print for error case
+        return state  # Return the modified state directly
+    
+    print(f"fetch_schema_node -> Returning state with schema_dict: {state.schema_dict}")
     return state
+
+
 
 def generate_query_node(state: QueryState) -> QueryState:
     example_query = EXAMPLE_QUERIES.get(state.table_name, "")
