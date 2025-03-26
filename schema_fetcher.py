@@ -1,48 +1,59 @@
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from config import DATABASE_URL
-
+ 
 def fetch_redshift_schema(schema_name="reports", table_name=None):
     """Fetch schema details for a specific table or all tables in the given Redshift schema."""
     engine = create_engine(DATABASE_URL)
     inspector = inspect(engine)
-    schema_lines = []
-
+    schema_output = ""
+ 
     try:
-        # Fetch table names from Redshift system catalog instead of relying on SQLAlchemy's inspector
         with engine.connect() as conn:
             result = conn.execute(
-                f"SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = '{schema_name}'"
+                text("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = :schema"),
+                {"schema": schema_name}
             )
             table_names = [row[0] for row in result]
-
-        if table_name:  # If a specific table is requested, filter the list
-            table_names = [table_name] if table_name in table_names else []
-
+ 
+        if table_name:
+            if table_name not in table_names:
+                return f"Table '{table_name}' not found in schema '{schema_name}'."
+            table_names = [table_name]
+ 
+        if not table_names:
+            return f"No tables found in schema '{schema_name}'."
+ 
         for table in table_names:
-            schema_lines.append(f"Table: {table}")
-
-            for column in inspector.get_columns(table, schema=schema_name):
+            schema_output += f"Table: {table}\n"
+ 
+            # Fetch column details
+            columns = inspector.get_columns(table, schema=schema_name)
+            for column in columns:
                 col_name = column["name"]
                 col_type = str(column["type"])
-
+                constraints = []
+ 
                 if column.get("primary_key"):
-                    col_type += ", Primary Key"
-
+                    constraints.append("Primary Key")
+ 
                 if column.get("foreign_keys"):
                     for fk in column["foreign_keys"]:
-                        col_type += f", Foreign Key to {fk['referred_table']}.{fk['referred_column']}"
-
-                schema_lines.append(f"- {col_name}: {col_type}")
-
-            schema_lines.append("")  # Blank line between tables
-
-        # Print the schema after fetching
-        print("Retrieved database schema.----------->", "\n".join(schema_lines))
-        return "\n".join(schema_lines)
-
+                        constraints.append(f"Foreign Key to {fk['referred_table']}.{fk['referred_column']}")
+ 
+                constraint_str = f" ({', '.join(constraints)})" if constraints else ""
+                schema_output += f"- {col_name}: {col_type}{constraint_str}\n"
+ 
+            schema_output += "\n"  # Blank line between tables
+ 
+        print("\n=== Final Extracted Schema ===\n", schema_output.strip())  # Print final schema
+        return schema_output.strip()
+ 
     except Exception as e:
         print(f"Error fetching schema: {e}")
         return f"Error fetching schema: {e}"
+ 
+    finally:
+        engine.dispose()  # Properly close the engine
+ 
 
-# Call the function and print the schema
-fetch_redshift_schema()  # This will print the schema for the 'reports' schema by default
+ 

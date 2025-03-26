@@ -12,7 +12,7 @@ os.environ["AZURE_OPENAI_ENDPOINT"] = "https://contoso-chat-sf-ai-aiserviceskbxj
 # Define Query Model
 class QueryModel(BaseModel):
     user_question: str
-    db_schema: Dict[str, list]  # Renamed from `schema` to `db_schema`
+    db_schema: Dict[str, str]  # Accepts string values instead of lists
 
 # Define SQL Query Generator Function
 def generate_sql(state: QueryModel):
@@ -31,14 +31,15 @@ def generate_sql(state: QueryModel):
     SQL Query:
     """
 
+    
     client = AzureOpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),  
-        api_version="2024-08-01-preview",
-        azure_endpoint="https://contoso-chat-sf-ai-aiserviceskbxjjgy2qok56.openai.azure.com"
-    )
+    api_key="3fa63f591fde45c6a32b9dc06e2af714",
+    api_version="2024-08-01-preview",
+    azure_endpoint="https://contoso-chat-sf-ai-aiserviceskbxjjgy2qok56.openai.azure.com"
+)
 
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o-mini",
         messages=[{"role": "system", "content": prompt}],
         temperature=0.5
     )

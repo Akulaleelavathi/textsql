@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import json
 from openai import AzureOpenAI
 
+
 # Initialize OpenAI LLM
 client = AzureOpenAI(
     api_key="3fa63f591fde45c6a32b9dc06e2af714",
@@ -19,10 +20,12 @@ class SQLValidationInput(BaseModel):
     query: str
 
 class SQLValidationOutput(BaseModel):
-    """Pydantic model for structured SQL validation response."""
     is_valid: bool
     validated_query: Optional[str] = None
-    error_message: Optional[str] = None
+    error_message: str = ""
+
+
+
 
 # Define the system prompt for SQL validation
 system_prompt = """You are an expert in Amazon Redshift SQL validation. Your job is to check the given SQL query for common mistakes and provide a structured response.
@@ -63,31 +66,37 @@ validation_prompt = ChatPromptTemplate.from_messages([
 ])
 
 # Function to validate SQL query with retry logic
+
+# Function to validate SQL query
 def validate_sql(query: str, max_retries=3) -> SQLValidationOutput:
     """Validates an SQL query using LLM and retries if invalid."""
     validation_chain = validation_prompt | StrOutputParser()
     retries = 0
 
     while retries < max_retries:
-        # Send request to LLM
-        response = client.invoke(validation_chain.format(query=query)).strip()
-
         try:
-            # Parse response
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": validation_chain.invoke({"query": query, "is_valid": ""})}]
+            ).choices[0].message.content.strip()
+
             parsed_result = SQLValidationOutput.model_validate(json.loads(response))
 
             if parsed_result.is_valid:
-                return parsed_result  # Return valid query response
+                return parsed_result  # ✅ Query is valid, return early
             else:
                 print(f"Retry {retries + 1}: Invalid query detected. Retrying...")
-                query = fix_query_with_llm(query, parsed_result.error_message)  # Fix query automatically
+                query = fix_query_with_llm(query, parsed_result.error_message)
                 retries += 1
+
+        except json.JSONDecodeError:
+            return SQLValidationOutput(is_valid=False, error_message="Error parsing LLM response. Invalid JSON format.")
         except Exception as e:
-            return SQLValidationOutput(is_valid=False, error_message=f"Parsing Error: {str(e)}")
+            return SQLValidationOutput(is_valid=False, error_message=f"Unexpected Error: {str(e)}")
 
     return SQLValidationOutput(is_valid=False, error_message="Query validation failed after 3 retries.")
 
-# Function to ask LLM to fix the SQL query
+# Function to fix the SQL query
 def fix_query_with_llm(query: str, error_message: str) -> str:
     """Asks LLM to fix an invalid query based on the detected issue."""
     fix_prompt = ChatPromptTemplate.from_messages([
@@ -96,10 +105,7 @@ def fix_query_with_llm(query: str, error_message: str) -> str:
     ])
     fix_chain = fix_prompt | StrOutputParser()
 
-    return client.invoke(fix_chain.format(query=query, error_message=error_message)).strip()
-
-# # Example Usage
-# if __name__ == "__main__":
-#     test_query = "SELECT * FROM orders WHERE order_date BETWEEN '2023-01-01' AND '2023-12-31';"
-#     result = validate_sql(test_query)
-#     print(result)
+    return client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": fix_chain.invoke({"query": query, "error_message": error_message})}]
+    ).choices[0].message.content.strip()
