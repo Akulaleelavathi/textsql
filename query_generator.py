@@ -12,22 +12,28 @@ os.environ["AZURE_OPENAI_ENDPOINT"] = "https://contoso-chat-sf-ai-aiserviceskbxj
 # Define Query Model
 class QueryModel(BaseModel):
     user_question: str
-    db_schema: Dict[str, str]  # Accepts string values instead of lists
+    db_schema: dict
+    table_name: str  # Add this field to store the table name
+
 
 # Define SQL Query Generator Function
 def generate_sql(state: QueryModel):
     """Generate SQL query using OpenAI"""
     user_question = state.user_question
     db_schema = state.db_schema
+    table_name = state.table_name
 
-    schema_text = "\n".join([f"{table}: {', '.join(fields)}" for table, fields in db_schema.items()])
+    # Format schema as a readable text
+    schema_text = "\n".join([f"{column}: {data_type}" for column, data_type in db_schema.items()])
+    
     prompt = f"""
     You are an expert SQL query generator for Amazon Redshift.
-    Below is the database schema:
+    Below is the database schema for the table '{table_name}':
     {schema_text}
 
-    Convert the following user question into a valid SQL query using the correct table and field names:
+    Convert the following user question into a valid SQL query:
     User Question: {user_question}
+
     SQL Query:
     """
 
@@ -38,37 +44,23 @@ def generate_sql(state: QueryModel):
     azure_endpoint="https://contoso-chat-sf-ai-aiserviceskbxjjgy2qok56.openai.azure.com"
 )
 
+    # Ensure correct message formatting
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "system", "content": prompt}],
+        messages=[
+            {"role": "system", "content": "You are a helpful AI assistant specialized in SQL generation."},
+            {"role": "user", "content": prompt}
+        ],
         temperature=0.5
     )
 
-    # DEBUG: Print the response to check its structure
-    print("Raw Response from OpenAI:", response)
+    print("Raw Response from OpenAI:", response)  # Debugging
 
-    # Ensure response contains valid data before accessing keys
-    if hasattr(response, "choices") and response.choices:
-        first_choice = response.choices[0]
-        if hasattr(first_choice, "message") and hasattr(first_choice.message, "content"):
-            sql_query = first_choice.message.content.strip()
-        else:
-            sql_query = "ERROR: Response message content not found"
-    else:
-        sql_query = "ERROR: No valid response received"
+    # Extract SQL query safely
+    try:
+        sql_query = response.choices[0].message.content.strip()
+    except (AttributeError, IndexError):
+        sql_query = "ERROR: Unable to extract SQL query from response."
 
-    return {"sql_query": sql_query}
-
-# Create LangGraph Workflow
-workflow = StateGraph(QueryModel)
-
-# Add Nodes
-workflow.add_node("generate_sql", generate_sql)
-
-# Define Start & End
-workflow.set_entry_point("generate_sql")
-workflow.set_finish_point("generate_sql")
-
-# Compile Graph
-graph = workflow.compile()
-
+    print(f"Generated SQL Query: {sql_query}")  # Debugging
+    return sql_query

@@ -6,7 +6,6 @@ from pydantic import BaseModel
 import json
 from openai import AzureOpenAI
 
-
 # Initialize OpenAI LLM
 client = AzureOpenAI(
     api_key="3fa63f591fde45c6a32b9dc06e2af714",
@@ -15,45 +14,25 @@ client = AzureOpenAI(
 )
 
 # Define Pydantic Model for SQL Query Validation
-class SQLValidationInput(BaseModel):
-    """Pydantic model for validating SQL input."""
-    query: str
-
 class SQLValidationOutput(BaseModel):
     is_valid: bool
-    validated_query: Optional[str] = None
-    error_message: str = ""
-
-
-
+    error_message: Optional[str] = ""
 
 # Define the system prompt for SQL validation
-system_prompt = """You are an expert in Amazon Redshift SQL validation. Your job is to check the given SQL query for common mistakes and provide a structured response.
+system_prompt = """You are an expert in Amazon Redshift SQL validation. Your job is to check the given SQL query for syntax and logical errors.
 
 ### Validation Criteria:
-1. **Syntax and Formatting:**
-   - Ensure correct Redshift-specific syntax (e.g., DISTKEY, SORTKEY, COPY commands).
-   - Properly quote identifiers and avoid unnecessary quotation marks.
-2. **Logical Issues:**
-   - Using `NOT IN` with NULL values can lead to incorrect results.
-   - `UNION` vs. `UNION ALL` - Use `UNION ALL` if duplicates are allowed.
-   - `BETWEEN` includes both endpoints. Ensure exclusive range if needed.
-3. **Data Type Consistency:**
-   - Ensure correct number and type of arguments for functions.
-   - Verify explicit casting where necessary.
-4. **Schema Validation:**
-   - Ensure referenced table and column names exist.
-   - Validate primary and foreign key constraints.
-5. **Performance Optimization:**
-   - Ensure proper indexes and sorting keys are used.
-   - Avoid SELECT * in large tables for efficiency.
+1. **Syntax and Formatting:** Ensure correct Redshift-specific syntax.
+2. **Logical Issues:** Detect NULL handling issues, `UNION` misuse, etc.
+3. **Data Type Consistency:** Ensure function arguments and casting are correct.
+4. **Schema Validation:** Verify table and column existence.
+5. **Performance Optimization:** Check indexing and avoid `SELECT *` for large tables.
 
 ### Output Format:
 Respond in JSON format:
 ```json
 {
     "is_valid": true/false,
-    "validated_query": "corrected SQL query or None",
     "error_message": "Explanation of issue or None"
 }
 ```
@@ -65,47 +44,27 @@ validation_prompt = ChatPromptTemplate.from_messages([
     ("human", "Query: {query}")
 ])
 
-# Function to validate SQL query with retry logic
-
 # Function to validate SQL query
-def validate_sql(query: str, max_retries=3) -> SQLValidationOutput:
-    """Validates an SQL query using LLM and retries if invalid."""
+def validate_sql(query: str) -> SQLValidationOutput:
+    """Validates an SQL query using LLM."""
     validation_chain = validation_prompt | StrOutputParser()
-    retries = 0
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": validation_chain.invoke({"query": query})}]
+        ).choices[0].message.content.strip()
+        
+        parsed_result = SQLValidationOutput.model_validate(json.loads(response))
+        return parsed_result
+    
+    except json.JSONDecodeError:
+        return SQLValidationOutput(is_valid=False, error_message="Error parsing LLM response. Invalid JSON format.")
+    except Exception as e:
+        return SQLValidationOutput(is_valid=False, error_message=f"Unexpected Error: {str(e)}")
 
-    while retries < max_retries:
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": validation_chain.invoke({"query": query, "is_valid": ""})}]
-            ).choices[0].message.content.strip()
-
-            parsed_result = SQLValidationOutput.model_validate(json.loads(response))
-
-            if parsed_result.is_valid:
-                return parsed_result  # ✅ Query is valid, return early
-            else:
-                print(f"Retry {retries + 1}: Invalid query detected. Retrying...")
-                query = fix_query_with_llm(query, parsed_result.error_message)
-                retries += 1
-
-        except json.JSONDecodeError:
-            return SQLValidationOutput(is_valid=False, error_message="Error parsing LLM response. Invalid JSON format.")
-        except Exception as e:
-            return SQLValidationOutput(is_valid=False, error_message=f"Unexpected Error: {str(e)}")
-
-    return SQLValidationOutput(is_valid=False, error_message="Query validation failed after 3 retries.")
-
-# Function to fix the SQL query
-def fix_query_with_llm(query: str, error_message: str) -> str:
-    """Asks LLM to fix an invalid query based on the detected issue."""
-    fix_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert in Amazon Redshift SQL optimization and correction. Given an incorrect SQL query and its issue, return a corrected version of the query."),
-        ("human", "Query: {query}\nError: {error_message}")
-    ])
-    fix_chain = fix_prompt | StrOutputParser()
-
-    return client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": fix_chain.invoke({"query": query, "error_message": error_message})}]
-    ).choices[0].message.content.strip()
+# Example Usage
+# if __name__ == "__main__":
+#     user_query = input("Enter your SQL query: ")
+#     result = validate_sql(user_query)
+#     print(f"Valid: {result.is_valid}, Error: {result.error_message}")

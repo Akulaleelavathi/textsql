@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from openai import OpenAI  # Use OpenAI's package instead
 from langgraph.graph import StateGraph
 from schema_fetcher import fetch_redshift_schema
-from query_generator import QueryModel
+from query_generator import QueryModel, generate_sql
 from sql_validator import validate_sql
 from db_connector import execute_query
 from table_identifier import identify_tables
@@ -23,7 +23,7 @@ class QueryState(BaseModel):
     table_name: str = ""
     schema_dict: dict = {}  # Ensure it's always a dictionary
     generated_sql: str = ""
-    validation_result: str = ""  # Store the validated SQL query as a string
+    # validation_result: str = ""  # Ensure it's always a string
     response: dict = {}
 
 
@@ -87,25 +87,32 @@ def fetch_schema_node(state: QueryState) -> QueryState:
 
 
 def generate_query_node(state: QueryState) -> QueryState:
-    print(f"generate_query_node -> Received schema_dict: {state.schema_dict}")  # Debugging print
+    print(f"generate_query_node -> Received schema_dict: {state.schema_dict}")  
 
     if not state.schema_dict:
         state.response = {"error": "Schema not found. Ensure table name is correct and schema is accessible."}
         print("generate_query_node -> Schema Dict Empty. Check fetch_schema_node.")
         return state
 
-    example_query = EXAMPLE_QUERIES.get(state.table_name, None)
-    if not example_query:
-        print(f"generate_query_node -> Warning: No example query found for table {state.table_name}")
-        example_query = ""  # Fallback to an empty query
+    if not state.table_name:
+        state.response = {"error": "Table name is missing. Ensure it is set before query generation."}
+        print("generate_query_node -> Table Name is Missing.")
+        return state
+
+    example_queries = EXAMPLE_QUERIES.get(state.table_name, None)
+    if not example_queries:
+        print(f"generate_query_node -> Warning: No example queries found for table {state.table_name}")
+        example_queries = {}  
 
     try:
         query_instance = QueryModel(
             user_question=state.user_input.user_question,
             db_schema=state.schema_dict,
-            example_query=example_query
+            table_name=state.table_name  # Ensure table name is passed
         )
-        state.generated_sql = query_instance.generate_sql()  # Ensure SQL is generated
+        print("query_instance--------------->", query_instance)
+
+        state.generated_sql = generate_sql(query_instance)  
         print(f"generate_query_node -> Generated SQL: {state.generated_sql}")
     except Exception as e:
         print(f"generate_query_node -> Error in Query Generation: {str(e)}")
@@ -114,20 +121,35 @@ def generate_query_node(state: QueryState) -> QueryState:
 
     return state
 
+# def validate_sql_node(state: QueryState) -> QueryState:
+#     if not state.generated_sql.strip():
+#         state.response = {"error": "SQL query generation failed."}
+#         return state
 
-
-def validate_sql_node(state: QueryState) -> QueryState:
-    validation = validate_sql(state.generated_sql)
-    print(f"validate_sql_node -> Validation result: {validation.is_valid}")
+#     validation = validate_sql(state.generated_sql)
     
-    if not state.generated_sql.strip():
-        state.response = {"error": "SQL query generation failed."}
-        return state
+#     # Debugging prints
+#     print(f"Generated SQL: {state.generated_sql}")
+#     print(f"Validation result: {validation.is_valid}")
+#     print(f"Validated query: {validation.validated_query}")
 
-    
-    # Ensure validation_result contains a valid SQL query
-    state.validation_result = validation.validated_query.get("query", "") if isinstance(validation.validated_query, dict) else validation.validated_query
-    return state
+#     # Handle empty or invalid validation result
+#     if not validation.is_valid:
+#         state.response = {"error": "SQL validation failed."}
+#         return state
+
+#     state.validation_result = (
+#         validation.validated_query.get("query", "")
+#         if isinstance(validation.validated_query, dict)
+#         else validation.validated_query or ""
+#     )
+
+#     if not state.validation_result:
+#         state.response = {"error": "SQL validation returned empty query."}
+#         return state
+
+    return state  # Return updated state if everything is fine
+
 
 
 def execute_query_node(state: QueryState) -> QueryState:
@@ -145,13 +167,13 @@ graph = StateGraph(QueryState)
 graph.add_node("identify_table", identify_table_node)
 graph.add_node("fetch_schema", fetch_schema_node)
 graph.add_node("generate_query", generate_query_node)
-graph.add_node("validate_sql", validate_sql_node)
+# graph.add_node("validate_sql", validate_sql_node)
 graph.add_node("execute_query", execute_query_node)
 
 graph.add_edge("identify_table", "fetch_schema")
 graph.add_edge("fetch_schema", "generate_query")
-graph.add_edge("generate_query", "validate_sql")
-graph.add_edge("validate_sql", "execute_query")
+graph.add_edge("generate_query", "execute_query")
+# graph.add_edge("validate_sql", "execute_query")
 
 # Set the entry point
 graph.set_entry_point("identify_table")
@@ -175,9 +197,11 @@ def main():
             user_query = UserQuery(user_question=user_input, table_name=table_name.strip())
             initial_state = QueryState(user_input=user_query)
             print(f"Initial state: {initial_state}")
-            final_state = QueryState(**workflow.invoke(initial_state))
 
-            
+            # Fix: Use parse_obj to correctly create a QueryState instance
+            final_state = QueryState.model_validate(workflow.invoke(initial_state))
+
+
             # Ensure final_state is an object and extract response safely
             if final_state.response.get("error"):
                 st.error(final_state.response["error"])
