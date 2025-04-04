@@ -1,7 +1,6 @@
 import os
-import openai
+import re
 from openai import AzureOpenAI
-from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from typing import Dict
 
@@ -12,23 +11,22 @@ os.environ["AZURE_OPENAI_ENDPOINT"] = "https://contoso-chat-sf-ai-aiserviceskbxj
 # Define Query Model
 class QueryModel(BaseModel):
     user_question: str
-    db_schema: dict
-    table_name: str  # Add this field to store the table name
+    db_schema: Dict[str, str]
+    table_name: str  # Store the table name
 
-
-# Define SQL Query Generator Function
-def generate_sql(state: QueryModel):
+# Define the core SQL generation logic
+def actual_logic_to_generate_sql(query_instance: QueryModel) -> str:
     """Generate SQL query using OpenAI"""
-    user_question = state.user_question
-    db_schema = state.db_schema
-    table_name = state.table_name
+    user_question = query_instance.user_question
+    db_schema = query_instance.db_schema
+    table_name = query_instance.table_name
 
-    # Format schema as a readable text
+    # Format schema as readable text
     schema_text = "\n".join([f"{column}: {data_type}" for column, data_type in db_schema.items()])
-    
+
     prompt = f"""
     You are an expert SQL query generator for Amazon Redshift.
-    Below is the database schema for the table '{table_name}':
+    Below is the database schema for the table 'reports.{table_name}':
     {schema_text}
 
     Convert the following user question into a valid SQL query:
@@ -36,6 +34,7 @@ def generate_sql(state: QueryModel):
 
     SQL Query:
     """
+
 
     
     client = AzureOpenAI(
@@ -58,9 +57,26 @@ def generate_sql(state: QueryModel):
 
     # Extract SQL query safely
     try:
-        sql_query = response.choices[0].message.content.strip()
+        return response.choices[0].message.content.strip()
     except (AttributeError, IndexError):
-        sql_query = "ERROR: Unable to extract SQL query from response."
+        return "ERROR: Unable to extract SQL query from response."
 
-    print(f"Generated SQL Query: {sql_query}")  # Debugging
+# Wrapper function to clean up SQL output
+def generate_sql(query_instance: QueryModel) -> str:
+    """
+    Generate a valid SQL query without extra text.
+    """
+    sql_query = actual_logic_to_generate_sql(query_instance)  # Generate SQL query
+
+    # Ensure only the SQL query is returned
+    sql_query = sql_query.strip()
+
+    if sql_query.startswith("To retrieve") or "```sql" in sql_query:
+        # Extract SQL from explanation
+        match = re.search(r"```sql\n(.*?)\n```", sql_query, re.DOTALL)
+        if match:
+            sql_query = match.group(1).strip()
+
+    print(f"✅ Final Cleaned SQL: {sql_query}")  # Debugging
+
     return sql_query

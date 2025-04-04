@@ -99,27 +99,32 @@ def generate_query_node(state: QueryState) -> QueryState:
         print("generate_query_node -> Table Name is Missing.")
         return state
 
-    example_queries = EXAMPLE_QUERIES.get(state.table_name, None)
-    if not example_queries:
-        print(f"generate_query_node -> Warning: No example queries found for table {state.table_name}")
-        example_queries = {}  
-
     try:
         query_instance = QueryModel(
             user_question=state.user_input.user_question,
             db_schema=state.schema_dict,
-            table_name=state.table_name  # Ensure table name is passed
+            table_name=state.table_name  
         )
-        print("query_instance--------------->", query_instance)
 
-        state.generated_sql = generate_sql(query_instance)  
-        print(f"generate_query_node -> Generated SQL: {state.generated_sql}")
+        state.generated_sql = generate_sql(query_instance)  # Ensure only SQL is returned
+
+        # Debugging: Check what `generate_sql` returns
+        print(f"🔍 Generated SQL: {state.generated_sql}")
+
+        # Validate if the query starts with SELECT, INSERT, UPDATE, etc.
+        if not re.match(r"^\s*(SELECT|INSERT|UPDATE|DELETE)", state.generated_sql, re.IGNORECASE):
+            state.response = {"error": "Generated query is invalid. Check query generation logic."}
+            print("❌ Invalid SQL format detected.")
+            return state
+
     except Exception as e:
         print(f"generate_query_node -> Error in Query Generation: {str(e)}")
         state.response = {"error": f"SQL Generation failed: {str(e)}"}
         return state
 
     return state
+
+
 
 # def validate_sql_node(state: QueryState) -> QueryState:
 #     if not state.generated_sql.strip():
@@ -148,18 +153,26 @@ def generate_query_node(state: QueryState) -> QueryState:
 #         state.response = {"error": "SQL validation returned empty query."}
 #         return state
 
-    return state  # Return updated state if everything is fine
+    # return state  # Return updated state if everything is fine
 
 
 
 def execute_query_node(state: QueryState) -> QueryState:
-    if not isinstance(state.validation_result, str) or not state.validation_result.strip():
+    if not isinstance(state.generated_sql, str) or not state.generated_sql.strip():
         state.response = {"error": "Invalid SQL query for execution."}
         return state
 
-    state.response = execute_query(state.validation_result)
-    print(f"execute_query_node -> Query execution response: {state.response}")
+    print(f"🚀 Executing Query:\n{state.generated_sql}")
+
+    query_result = execute_query(state.generated_sql)
+    
+    # Ensure response is always a dictionary
+    state.response = query_result if isinstance(query_result, dict) else {"result": query_result}
+
+    print(f"📊 Query Execution Response: {state.response}")  # Debugging
     return state
+
+
 
 
 # Build LangGraph workflow

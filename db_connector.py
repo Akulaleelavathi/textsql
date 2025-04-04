@@ -1,46 +1,18 @@
-from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
-from config import DATABASE_URL
-from langgraph.graph import StateGraph
+from sqlalchemy import create_engine, text
+# from config import DATABASE_URL
+from urllib.parse import quote_plus
+password = "Service@007"
+encoded_password = quote_plus(password)
+DATABASE_URL = f"postgresql+psycopg2://zonoservice:{encoded_password}@localhost:5440/qa"
 
-# Define state for LangGraph
-class SQLState:
-    def __init__(self, query: str):
-        self.query = query
-        self.result = None
-        self.error = None
-
-def execute_query(state: SQLState):
-    """Executes the SQL query and updates the state."""
+def execute_query(sql_query: str):
+    print("sql query---------------->",sql_query)
+    """Executes the given SQL query and returns the result."""
     engine = create_engine(DATABASE_URL)
+
     try:
         with engine.connect() as connection:
-            result = connection.execute(state.query)
-            state.result = [row._asdict() for row in result]
-    except SQLAlchemyError as e:
-        state.error = str(e)
-    return state
-
-# Define the graph
-graph = StateGraph(SQLState)
-
-# Fix: Add missing identify_table node
-def identify_table(state: SQLState):
-    """Placeholder function to process or identify tables before execution."""
-    return state
-
-graph.add_node("identify_table", identify_table)  # Add this function
-graph.add_node("execute_query", execute_query)
-graph.add_edge("identify_table", "execute_query")  # Set the flow
-
-graph.set_entry_point("identify_table")  # Keep as entry point
-
-# Compile the graph (place this after defining nodes and edges)
-workflow = graph.compile()
-
-def run_sql_query(sql_query: str):
-    state = SQLState(query=sql_query)
-    final_state = workflow.run(state)
-    if final_state.error:
-        return {"error": final_state.error}
-    return final_state.result
+            result = connection.execute(text(sql_query))
+            return [dict(row) for row in result]
+    except Exception as e: 
+        return {"error": str(e)}
